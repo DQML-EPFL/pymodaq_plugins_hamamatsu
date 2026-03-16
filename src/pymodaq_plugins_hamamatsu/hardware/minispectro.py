@@ -252,3 +252,11 @@ class MiniSpectro:
 
 if __name__ == "__main__":
     spectro = MiniSpectro()
+    pixel_array, wl_array, intensity = spectro.get_sensor_data()
+    
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(6,6), dpi=150)
+    plt.plot(wl_array, intensity, color="darkred")
+    plt.axhline(0, color="k", linestyle="--", linewidth=1)
+    plt.xlabel("Wavelength [nm]"); plt.ylabel("Intensity [a.u.]")
+    plt.show()
