@@ -49,7 +49,9 @@ class MiniSpectro:
     close()
         Close device.
     """
-    
+
+    background = None
+
     def __init__(self):
         for dev in usb.core.find(find_all=True):
             if hex(dev.idProduct).find("0x290") == 0:       # We make the assumption only Mini-spectrometers
@@ -238,7 +240,9 @@ class MiniSpectro:
         """
         pixel_array = np.linspace(0, self.sensor_size-1, self.sensor_size)
         wl_array = np.linspace(self.lower_wl, self.upper_wl, self.sensor_size)
-        intensity = np.array(DLL.USB_GetSensorData(self._handle, self._pipe, self.sensor_size, self.buffer_array)[1])
+        intensity = np.array(DLL.USB_GetSensorData(self._handle, self._pipe, self.sensor_size, self.buffer_array)[1], dtype="float")
+
+        if self.background is not None : intensity -= self.background
 
         return pixel_array, wl_array, intensity
 
@@ -250,8 +254,14 @@ class MiniSpectro:
         DLL.USB_CloseDevice(self._handle)
 
 
+    def set_background(self):
+        self.background = None
+        _,_, self.background = self.get_sensor_data()
+
+
 if __name__ == "__main__":
     spectro = MiniSpectro()
+    spectro.set_background()
     pixel_array, wl_array, intensity = spectro.get_sensor_data()
     
     import matplotlib.pyplot as plt

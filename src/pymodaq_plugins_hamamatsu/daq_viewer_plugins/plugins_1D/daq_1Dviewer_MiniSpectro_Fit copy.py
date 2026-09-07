@@ -6,8 +6,9 @@ from pymodaq.utils.parameter import Parameter
 
 from pymodaq_plugins_hamamatsu.hardware.minispectro import MiniSpectro
 
+from pymodaq_plugins_hamamatsu.daq_viewer_plugins.plugins_1D.daq_1Dviewer_MiniSpectro import DAQ_1DViewer_MiniSpectro
 
-class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
+class DAQ_1DViewer_MiniSpectro_Fit(DAQ_Viewer_base):
     """ Instrument plugin class for Hamamatsu USB Mini-spectrometers.
     
     This object inherits all functionalities to communicate with PyMoDAQ's DAQ_Viewer module through inheritance via
@@ -37,8 +38,7 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
                         'limits': ['Rising edge', 'Falling edge'], 'value': 'Rising edge'},
         {'title': 'Gain mode', 'name': 'gain', 'type': 'list', 'limits': ['Low gain', 'High gain', 'None'], 'value': ''},
         {'title': 'Integration time', 'name': 'integration_time', 'type': 'int', 'value': 100, 'min': 5, 'max': 10000,
-                        'siPrefix': True, 'suffix': 'ms', 'tip': 'MIN = 5 ms, MAX = 10000 ms'},
-        {'title': 'Set Background', 'name': 'backgound_button', 'type': 'bool_push', 'value': False},
+                        'siPrefix': True, 'suffix': 'ms', 'tip': 'MIN = 5 ms, MAX = 10000 ms'}
         ]
 
     def ini_attributes(self):
@@ -67,9 +67,7 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
                 self.controller.set_parameter(trigger_mode=0x00)
             elif param.value() == 'Falling edge':
                 self.controller.set_parameter(trigger_mode=0x01)
-        if param.name() == 'backgound_button':
-            self.controller.set_background()
-            self.settings.child('backgound_button').setValue(False)
+
 
     def ini_detector(self, controller=None):
         """Detector communication initialization
@@ -139,6 +137,17 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
         """
         # Synchrone version (blocking function)
         data_tot = self.controller.get_sensor_data()[2]
+        popt, pcov = self.fit_data(data_tot[0])
+    
+        if popt is not None:    
+            self.dte_signal.emit(DataToExport(name='MiniSpectro',
+                                          data=[DataFromPlugins(name='Mini-spectrometer_Fit',
+                                                                data=gaussian(self.x_axis, *popt),
+                                                                dim='Data1D',
+                                                                labels=['Fit'],
+                                                                axes=[self.x_axis])]))
+        else: print("Couldn't emit since fit failed")
+        
         self.dte_signal.emit(DataToExport(name='MiniSpectro',
                                           data=[DataFromPlugins(name='Mini-spectrometer',
                                                                 data=data_tot,
@@ -152,6 +161,41 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
         """
         self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
+    def fit_data(self, data):
+        """Fit the acquired data with a Gaussian function.
+
+        Parameters
+        ----------
+        data: array
+            The 1D array of data to fit (spectrum)
+
+        Returns
+        -------
+        popt: array
+            Optimal values for the parameters so that the sum of the squared residuals of
+            f(xdata, *popt) - ydata is minimized.
+        pcov: 2D array
+            The estimated covariance of popt. The diagonals provide the variance of the
+            parameter estimate.
+        """
+        from scipy.optimize import curve_fit
+
+        x_data = self.x_axis
+        y_data = data
+
+        # Initial guess for the parameters [amplitude, mean, stddev, offset]
+        initial_guess = [np.max(y_data) - np.min(y_data), x_data[np.argmax(y_data)], (x_data[-1]-x_data[0])/6 , np.min(y_data)]
+
+        try:
+            popt, pcov = curve_fit(DAQ_1DViewer_MiniSpectro.gaussian, x_data, y_data, p0=initial_guess)
+            return popt, pcov
+        except RuntimeError:
+            print("Error - curve_fit failed")
+            return None, None
+
+
+def gaussian(x, a, x0, sigma, offset):
+    return a * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2)) + offset
 
 if __name__ == '__main__':
     main(__file__)

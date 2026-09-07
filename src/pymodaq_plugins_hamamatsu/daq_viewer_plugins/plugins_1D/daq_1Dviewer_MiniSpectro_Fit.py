@@ -3,11 +3,13 @@ from pymodaq.utils.daq_utils import ThreadCommand
 from pymodaq.utils.data import DataFromPlugins, Axis, DataToExport
 from pymodaq.control_modules.viewer_utility_classes import DAQ_Viewer_base, comon_parameters, main
 from pymodaq.utils.parameter import Parameter
+from scipy.optimize import curve_fit
 
 from pymodaq_plugins_hamamatsu.hardware.minispectro import MiniSpectro
 
+from pymodaq_plugins_hamamatsu.daq_viewer_plugins.plugins_1D.daq_1Dviewer_MiniSpectro import DAQ_1DViewer_MiniSpectro
 
-class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
+class DAQ_1DViewer_MiniSpectro_Fit(DAQ_1DViewer_MiniSpectro):
     """ Instrument plugin class for Hamamatsu USB Mini-spectrometers.
     
     This object inherits all functionalities to communicate with PyMoDAQ's DAQ_Viewer module through inheritance via
@@ -24,104 +26,9 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
     path in the python wrapper "minispectro.py" in the case you place it somewhere else. This .dll file can also be found in
     the installation files of the Hamamatsu Evaluation Software originally provided with the device CD.
     """
-    params = comon_parameters + [
-        {'title': 'Device ID', 'name': 'unit_id', 'type': 'str', 'value': '', 'readonly': True},
-        {'title': 'Sensor name', 'name': 'sensor_name', 'type': 'str', 'value': '', 'readonly': True},
-        {'title': 'Serial number', 'name': 'serial_number', 'type': 'str', 'value': '', 'readonly': True},
-        {'title': 'Lower λ', 'name': 'lower_wl', 'type': 'int', 'value': 0, 'suffix': 'nm', 'readonly': True},
-        {'title': 'Upper λ', 'name': 'upper_wl', 'type': 'int', 'value': 0, 'suffix': 'nm', 'readonly': True},
-        {'title': 'Pixels', 'name': 'pixel_nb', 'type': 'str', 'value': '', 'readonly': True},
-        {'title': 'Trigger mode:', 'name': 'trig_mode', 'type': 'list',
-                        'limits': ['Internal', 'External (edge)', 'External (gate)'], 'value': 'Internal'},
-        {'title': 'Trigger edge:', 'name': 'trig_edge', 'type': 'list',
-                        'limits': ['Rising edge', 'Falling edge'], 'value': 'Rising edge'},
-        {'title': 'Gain mode', 'name': 'gain', 'type': 'list', 'limits': ['Low gain', 'High gain', 'None'], 'value': ''},
-        {'title': 'Integration time', 'name': 'integration_time', 'type': 'int', 'value': 100, 'min': 5, 'max': 10000,
-                        'siPrefix': True, 'suffix': 'ms', 'tip': 'MIN = 5 ms, MAX = 10000 ms'}
-        ]
+    params = DAQ_1DViewer_MiniSpectro.params + [
 
-    def ini_attributes(self):
-        self.controller: MiniSpectro = None
-        self.x_axis = None
-
-    def commit_settings(self, param: Parameter):
-        """Apply the consequences of a change of value in the detector settings
-
-        Parameters
-        ----------
-        param: Parameter
-            A given parameter (within detector_settings) whose value has been changed by the user
-        """
-        if param.name() == "integration_time":
-            self.controller.set_parameter(integ_time=int(self.settings['integration_time']*1e3))  # Convert from ms to µs
-        if param.name() == 'trig_mode':
-            if param.value() == 'Internal':
-                self.controller.set_parameter(trigger_mode=0x00)
-            elif param.value() == 'External (edge)':
-                self.controller.set_parameter(trigger_mode=0x01)
-            elif param.value() == 'External (gate)':
-                self.controller.set_parameter(trigger_mode=0x02)
-        if param.name() == 'trig_edge':
-            if param.value() == 'Rising edge':
-                self.controller.set_parameter(trigger_mode=0x00)
-            elif param.value() == 'Falling edge':
-                self.controller.set_parameter(trigger_mode=0x01)
-
-
-    def ini_detector(self, controller=None):
-        """Detector communication initialization
-
-        Parameters
-        ----------
-        controller: (object)
-            custom object of a PyMoDAQ plugin (Slave case). None if only one actuator/detector by controller
-            (Master case)
-
-        Returns
-        -------
-        info: str
-        initialized: bool
-            False if initialization failed otherwise True
-        """
-        self.ini_detector_init(slave_controller=controller)
-
-        if self.is_master:
-            self.controller = MiniSpectro()
-
-        self.settings.child('unit_id').setValue(self.controller.unit_id)
-        self.settings.child('sensor_name').setValue(self.controller.sensor_name)
-        self.settings.child('serial_number').setValue(self.controller.serial_number)
-        self.settings.child('lower_wl').setValue(self.controller.lower_wl)
-        self.settings.child('upper_wl').setValue(self.controller.upper_wl)
-        self.settings.child('pixel_nb').setValue(self.controller.sensor_size)
-
-        # Check if device handles external trigger
-        if '0xff' in self.controller.trigger_edge:
-            self.settings.child('trig_mode').setValue('Internal')
-            self.settings.child('trig_mode').setReadonly()
-        
-        if '0xff' in self.controller.gain:
-            self.settings.child('gain').setValue('None')
-            self.settings.child('gain').setReadonly()
-
-        data_x_axis = self.controller.get_sensor_data()[1]*1e-9
-        self.x_axis = Axis(data=data_x_axis, label='Wavelength', units='m', index=0)
-
-        # Initialize viewers panel with the future type of data
-        self.dte_signal_temp.emit(DataToExport(name='MiniSpectro',
-                                               data=[DataFromPlugins(name='Mini-spectrometer',
-                                                                     data=[np.array([0 for _ in range(self.controller.sensor_size)])],
-                                                                     dim='Data1D', labels=['Spectrometer'],
-                                                                     axes=[self.x_axis])]))
-
-        info = "Whatever info you want to log"
-        initialized = True
-        return info, initialized
-
-    def close(self):
-        """Terminate the communication protocol"""
-        if self.controller is not None:
-            self.controller.close()
+    ]
 
     def grab_data(self, Naverage=1, **kwargs):
         """Start a grab from the detector
@@ -135,62 +42,42 @@ class DAQ_1DViewer_MiniSpectro(DAQ_Viewer_base):
             others optionals arguments
         """
         # Synchrone version (blocking function)
-        data_tot = self.controller.get_sensor_data()[2]
-        popt, pcov = self.fit_data(data_tot[0])
-    
-        if popt is not None:    
-            self.dte_signal.emit(DataToExport(name='MiniSpectro',
-                                          data=[DataFromPlugins(name='Mini-spectrometer_Fit',
-                                                                data=gaussian(self.x_axis, *popt),
-                                                                dim='Data1D',
-                                                                labels=['Fit'],
-                                                                axes=[self.x_axis])]))
-        else: print("Couldn't emit since fit failed")
+        pixel_array, wl_array, data_tot = self.controller.get_sensor_data()
+
         
-        self.dte_signal.emit(DataToExport(name='MiniSpectro',
+
+        try:
+            x_data = wl_array
+            y_data = data_tot
+            initial_guess = [np.max(y_data) - np.min(y_data), x_data[np.argmax(y_data)], (x_data[-1]-x_data[0])/6 , np.min(y_data)]
+            popt, pcov = curve_fit(gaussian, x_data, y_data, p0=initial_guess)
+
+            dfp = []
+            dfp.append(DataFromPlugins(name='Mini-spectrometer_Fit',
+                                        data=data_tot,
+                                        dim='Data1D',
+                                        labels=['Data'],
+                                        axes=[self.x_axis]))
+
+            dfp.append(DataFromPlugins(name='Mini-spectrometer_Fit',
+                                        data=gaussian(x_data, *popt),
+                                        dim='Data1D',
+                                        labels=['Fit'],
+                                        axes=[self.x_axis]))
+
+            self.dte_signal.emit(DataToExport(name='MiniSpectro', data=dfp))
+
+            print(popt[1])
+
+        except Exception as e:
+            self.dte_signal.emit(DataToExport(name='MiniSpectro',
                                           data=[DataFromPlugins(name='Mini-spectrometer',
                                                                 data=data_tot,
                                                                 dim='Data1D',
                                                                 labels=['Spectrometer'],
-                                                                axes=[self.x_axis])]))
+                                                                axes=[self.x_axis])]))        
 
-    def stop(self):
-        """
-        Stop the current grab by emitting a status. Works by stopping to call get_sensor_data() function)
-        """
-        self.emit_status(ThreadCommand('Update_Status', ['Some info you want to log']))
 
-    def fit_data(self, data):
-        """Fit the acquired data with a Gaussian function.
-
-        Parameters
-        ----------
-        data: array
-            The 1D array of data to fit (spectrum)
-
-        Returns
-        -------
-        popt: array
-            Optimal values for the parameters so that the sum of the squared residuals of
-            f(xdata, *popt) - ydata is minimized.
-        pcov: 2D array
-            The estimated covariance of popt. The diagonals provide the variance of the
-            parameter estimate.
-        """
-        from scipy.optimize import curve_fit
-
-        x_data = self.x_axis
-        y_data = data
-
-        # Initial guess for the parameters [amplitude, mean, stddev, offset]
-        initial_guess = [np.max(y_data) - np.min(y_data), x_data[np.argmax(y_data)], (x_data[-1]-x_data[0])/6 , np.min(y_data)]
-
-        try:
-            popt, pcov = curve_fit(DAQ_1DViewer_MiniSpectro.gaussian, x_data, y_data, p0=initial_guess)
-            return popt, pcov
-        except RuntimeError:
-            print("Error - curve_fit failed")
-            return None, None
 
 
 def gaussian(x, a, x0, sigma, offset):
